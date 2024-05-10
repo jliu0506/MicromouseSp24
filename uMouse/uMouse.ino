@@ -1,20 +1,17 @@
+#include <Stack.h>
+
 #include <Adafruit_Sensor.h>
-// #include <Wire.h>
+
 #include <Adafruit_BusIO_Register.h>
 #include <Adafruit_I2CDevice.h>
 #include <Adafruit_I2CRegister.h>
 #include <Adafruit_SPIDevice.h>
 
-
-#include <MadgwickAHRS.h>
-
-#include <Arduino.h>
-#include <Wire.h>
-#include <VL53L0X.h>
-#include <MadgwickAHRS.h>
-
 #include <Adafruit_LSM6DS3TRC.h>
 
+#include <VL53L0X.h>
+
+#include <Arduino.h>
 
 /*Constants-------------------------------------------------------------------------*/
 
@@ -41,19 +38,14 @@
 #define RIGHT_MOTOR_EN        A7
 
 //Chip select pin on LSM
-#define LSM_CS                13
+#define LSM_CS                D13
 
 //Tof XSHUT pins
-#define TOF_XSHUT_LEFT        2
-#define TOF_XSHUT_FRONT       3
-#define TOF_XSHUT_RIGHT       4 
+#define TOF_XSHUT_LEFT        D2
+#define TOF_XSHUT_FRONT       D3
+#define TOF_XSHUT_RIGHT       D4 
 
-// #define PI                    3.14159265358979324
-
-//IMU Shit Need Madgwick filter library from arduino
-float orientationFilteredOld;
-Madgwick filter;
-const float sensorRate  = 104.00;
+#define PI                    3.14159265358979324
 
 /*Enumerations----------------------------------------------------------------------*/
 
@@ -88,10 +80,6 @@ void updateMaze();
 void wallLogic();
 void cellMove(TRAVERSE decision);
 void calculatePos();
-
-//Encoder functions for interrupt
-void readEncoder1();
-void readEncoder2();
 
 Adafruit_LSM6DS3TRC lsm6ds3trc;
 VL53L0X sensorL;
@@ -170,6 +158,9 @@ struct node
   node *c;
 };
 
+Stack<int> cellX;
+Stack<int> cellY;
+
 /*Linked List Declaration-----------------------------------------------------------*/
 
 node* north = new node();
@@ -214,7 +205,7 @@ void setup(void)
   //LSM chip select pin
   pinMode(LSM_CS,OUTPUT);
 
-  //ToF XSHUT pins
+  //ToF XSHUT pins configured to standby mode at OUTPUT mode
   pinMode(TOF_XSHUT_LEFT,OUTPUT);
   pinMode(TOF_XSHUT_FRONT,OUTPUT);
   pinMode(TOF_XSHUT_RIGHT,OUTPUT);
@@ -231,42 +222,40 @@ void setup(void)
   }
 
   Serial.println("LSM6DS3TR-C Found!");
-  filter.begin(sensorRate);
+
   //Initialize ToF sensors
   changeToFAddress();
 }
 
-// /*Loop-----------------------------------------------------------------------------*/
+/*Loop-----------------------------------------------------------------------------*/
 
 void loop() {
 
-//   /*
-//   //Read gyro on z, accel on x and y
-  // readLSM();
+  /*
+  //Read gyro on z, accel on x and y
+  readLSM();
 
-//   //Read all ToF sensors
+  //Read all ToF sensors
   readDistance();
 
-//   //Calculate position
+  //Calculate position
 
-//   delay(200);
-//   */
+  delay(200);
+  */
 
-//   //Movement
-//   cellMove(GO_FORWARD);
+  //Movement
+  cellMove(GO_FORWARD);
 
-//   //
+  //
 }
 
-// /*Function definitions-------------------------------------------------------------*/
+/*Function definitions-------------------------------------------------------------*/
 
-// //ToF change address
+//ToF change address
 void changeToFAddress()
 {
-  //Pull low only one XSHUT pin since it is active LOW
-  digitalWrite(TOF_XSHUT_LEFT,LOW);
-  digitalWrite(TOF_XSHUT_FRONT,HIGH);
-  digitalWrite(TOF_XSHUT_RIGHT,HIGH);
+  //Configure only one XSHUT to be INPUT, giving it High Impedance
+  pinMode(TOF_XSHUT_LEFT,INPUT);
 
   //Left sensor
   sensorL.setTimeout(500);
@@ -277,9 +266,8 @@ void changeToFAddress()
   }
   sensorL.setAddress((uint8_t)76);
 
-  digitalWrite(TOF_XSHUT_LEFT,HIGH);
-  digitalWrite(TOF_XSHUT_FRONT,LOW);
-  digitalWrite(TOF_XSHUT_RIGHT,HIGH);
+  pinMode(TOF_XSHUT_LEFT,OUTPUT);
+  pinMode(TOF_XSHUT_FRONT,INPUT);
 
   //Front sensor
   sensorF.setTimeout(500);
@@ -290,9 +278,8 @@ void changeToFAddress()
   }
   sensorF.setAddress((uint8_t)70);
 
-  digitalWrite(TOF_XSHUT_LEFT,HIGH);
-  digitalWrite(TOF_XSHUT_FRONT,HIGH);
-  digitalWrite(TOF_XSHUT_RIGHT,LOW);
+  pinMode(TOF_XSHUT_FRONT,OUTPUT);
+  pinMode(TOF_XSHUT_RIGHT,INPUT);
 
   //Right sensor
   sensorR.setTimeout(500);
@@ -318,14 +305,13 @@ void readDistance()
   old_front = front;
 
   left = sensorL.readRangeSingleMillimeters();
-  if (sensorL.timeoutOccurred()) { Serial.println(" TIMEOUT on Left sensor"); }
+  if (sensorL.timeoutOccurred()) { Serial.print(" TIMEOUT on Left sensor"); }
 
   front = sensorF.readRangeSingleMillimeters();
-  if (sensorF.timeoutOccurred()) { Serial.println(" TIMEOUT on Front sensor"); }
-  Serial.println(front);
+  if (sensorF.timeoutOccurred()) { Serial.print(" TIMEOUT on Front sensor"); }
+
   right = sensorR.readRangeSingleMillimeters();
-  if (sensorR.timeoutOccurred()) { Serial.println(" TIMEOUT on Right sensor"); }
-  Serial.println(right);
+  if (sensorR.timeoutOccurred()) { Serial.print(" TIMEOUT on Right sensor"); }
 }
 
 //Read gyro and put into variables (in rad/s)
@@ -338,208 +324,153 @@ void readLSM()
   gyroZ = gyro.gyro.z;
   accelX = accel.acceleration.x;
   accelY = accel.acceleration.y;
-
-  float roll,pitch, yaw;
-  filter.updateIMU(gyro.gyro.x, gyro.gyro.y, gyro.gyro.z, accel.acceleration.x, accelY, accel.acceleration.z);
-  yaw = filter.getYaw();
-  float yawFiltered = 0.1 * yaw + 0.9 * orientationFilteredOld;
-  Serial.println("pitch: " + String(yawFiltered));
-  orientationFilteredOld = yawFiltered;
-
 }
 
-// void updateMaze()
-// {
-//   //First read the distance from wall
-// //  readDistance();
+void updateMaze()
+{
+  //First read the distance from wall
+  readDistance();
 
-//   //Then do logic to update maze
-//   wallLogic();
-// }
+  //Then do logic to update maze
+  wallLogic();
+}
 
-// //Configured so that the mouse always thinks it's facing NORTH at the beginning
-// void wallLogic()
-// {
-//   if(left <= CELL_THRESHOLD)
-//   {
-//     maze[cell_x][cell_y][current->cc->data] = true;
-//   }
-//   if(right <= CELL_THRESHOLD)
-//   {
-//     maze[cell_x][cell_y][current->c->data] = true;
-//   }
-//   if(front <= CELL_THRESHOLD)
-//   {
-//     maze[cell_x][cell_y][current->data] = true;
-//   }
-// }
+//Configured so that the mouse always thinks it's facing NORTH at the beginning
+void wallLogic()
+{
+  if(left <= CELL_THRESHOLD)
+  {
+    maze[cell_x][cell_y][current->cc->data] = true;
+  }
+  if(right <= CELL_THRESHOLD)
+  {
+    maze[cell_x][cell_y][current->c->data] = true;
+  }
+  if(front <= CELL_THRESHOLD)
+  {
+    maze[cell_x][cell_y][current->data] = true;
+  }
+}
 
-// void calculatePos()
-// {
-//   //Have to take direction into account
+void calculatePos()
+{
+  //Have to take direction into account
 
-//   //If currently facing north or south
-//   if(current->data%2)
-//   {
-//     //First sees if we should add or subtract to absolute pos coord
-//     //Then calculates the distance elapsed relative to old position
-//     posY += pow(-1,(current->data - 1)/2)*(old_front - front);
-//   }
-//   else
-//   {
-//     posX += pow(-1,(current->data/2))*(old_front - front);
-//   }
-// }
+  //If currently facing north or south
+  if(current->data%2)
+  {
+    //First sees if we should add or subtract to absolute pos coord
+    //Then calculates the distance elapsed relative to old position
+    posY += pow(-1,(current->data - 1)/2)*(old_front - front);
+  }
+  else
+  {
+    posX += pow(-1,(current->data/2))*(old_front - front);
+  }
+}
 
-// void cellMove(TRAVERSE decision)
-// {
-//   //Take absolute coords and move ourselves up one cell
+void cellMove(TRAVERSE decision)
+{
+  //Take absolute coords and move ourselves up one cell
   
-//   //First disable enable pin to make sure it's all synchronized
-//   digitalWrite(LEFT_MOTOR_EN, LOW);
-//   digitalWrite(RIGHT_MOTOR_EN,LOW);
+  //First disable enable pin to make sure it's all synchronized
+  digitalWrite(LEFT_MOTOR_EN, LOW);
+  digitalWrite(RIGHT_MOTOR_EN,LOW);
 
-//   switch(decision)
-//   {
-//     //Read the distance first
-//  //   readDistance();
-//     mark_left = old_left;
-//     mark_front = old_front;
-//     mark_right = old_right;
+  switch(decision)
+  {
+    //Read the distance first
+    readDistance();
+    mark_left = old_left;
+    mark_front = old_front;
+    mark_right = old_right;
 
-//     case GO_FORWARD:
-//       //Left motor
-//       digitalWrite(LEFT_MOTOR1,HIGH);
-//       digitalWrite(LEFT_MOTOR2,LOW);
+    case GO_FORWARD:
+      //Left motor
+      digitalWrite(LEFT_MOTOR1,HIGH);
+      digitalWrite(LEFT_MOTOR2,LOW);
 
-//       //Right motor
-//       digitalWrite(RIGHT_MOTOR1,HIGH);
-//       digitalWrite(RIGHT_MOTOR2,LOW);
-//       break;
-//     case TURN_LEFT:
-//       //Get time mark at the beginning of call
-//       old_time = millis();
+      //Right motor
+      digitalWrite(RIGHT_MOTOR1,HIGH);
+      digitalWrite(RIGHT_MOTOR2,LOW);
+      break;
+    case TURN_LEFT:
+      //Get time mark at the beginning of call
+      old_time = millis();
 
-//       //Left motor
-//       digitalWrite(LEFT_MOTOR1,LOW);
-//       digitalWrite(LEFT_MOTOR2,HIGH);
+      //Left motor
+      digitalWrite(LEFT_MOTOR1,LOW);
+      digitalWrite(LEFT_MOTOR2,HIGH);
 
-//       //Right motor
-//       digitalWrite(RIGHT_MOTOR1,HIGH);
-//       digitalWrite(RIGHT_MOTOR2,LOW);
-//       break;
-//     case TURN_RIGHT:
-//       //Get time mark at the beginning of call
-//       old_time = millis();
+      //Right motor
+      digitalWrite(RIGHT_MOTOR1,HIGH);
+      digitalWrite(RIGHT_MOTOR2,LOW);
+      break;
+    case TURN_RIGHT:
+      //Get time mark at the beginning of call
+      old_time = millis();
 
-//       //Left motor
-//       digitalWrite(LEFT_MOTOR1,HIGH);
-//       digitalWrite(LEFT_MOTOR2,LOW);
+      //Left motor
+      digitalWrite(LEFT_MOTOR1,HIGH);
+      digitalWrite(LEFT_MOTOR2,LOW);
 
-//       //Right motor
-//       digitalWrite(RIGHT_MOTOR1,LOW);
-//       digitalWrite(RIGHT_MOTOR2,HIGH);
-//       break;
-//     case GO_BACK:
-//       //Left motor
-//       digitalWrite(LEFT_MOTOR1,LOW);
-//       digitalWrite(LEFT_MOTOR2,HIGH);
+      //Right motor
+      digitalWrite(RIGHT_MOTOR1,LOW);
+      digitalWrite(RIGHT_MOTOR2,HIGH);
+      break;
+    case GO_BACK:
+      //Left motor
+      digitalWrite(LEFT_MOTOR1,LOW);
+      digitalWrite(LEFT_MOTOR2,HIGH);
 
-//       //Right motor
-//       digitalWrite(RIGHT_MOTOR1,LOW);
-//       digitalWrite(RIGHT_MOTOR2,HIGH);
-//       break;
-//   } 
+      //Right motor
+      digitalWrite(RIGHT_MOTOR1,LOW);
+      digitalWrite(RIGHT_MOTOR2,HIGH);
+      break;
+  } 
 
-//   //For now, I'm just going to put this at the highest speed setting
-//   digitalWrite(LEFT_MOTOR_EN,HIGH);
-//   digitalWrite(RIGHT_MOTOR_EN,HIGH);
+  //For now, I'm just going to put this at the highest speed setting
+  digitalWrite(LEFT_MOTOR_EN,HIGH);
+  digitalWrite(RIGHT_MOTOR_EN,HIGH);
 
-//   switch(decision)
-//   {
-//     case GO_FORWARD:
-//       //Move forward until the mouse knows it has travelled one cell threshold
-//       while(mark_front - front <= CELL_THRESHOLD)
-//       {
-//         //Keep updating until it moves one threshold
-//  //       readDistance();
-//       }
-//       digitalWrite(LEFT_MOTOR_EN,LOW);
-//       digitalWrite(RIGHT_MOTOR_EN,LOW);
-//       break;
-//     case GO_BACK:
-//       //Same concept
-//       //Move forward until the mouse knows it has travelled one cell threshold
-//       while(front - mark_front <= CELL_THRESHOLD)
-//       {
-//         //Keep updating until it moves one threshold
-//  //       readDistance();
-//       }
-//       digitalWrite(LEFT_MOTOR_EN,LOW);
-//       digitalWrite(RIGHT_MOTOR_EN,LOW);
-//       break;
-//     case TURN_LEFT:
-//     case TURN_RIGHT:
-//       //We are allowed to do this because gyroZ will automatically be either positive or negative depending on turn direction
+  switch(decision)
+  {
+    case GO_FORWARD:
+      //Move forward until the mouse knows it has travelled one cell threshold
+      while(mark_front - front <= CELL_THRESHOLD)
+      {
+        //Keep updating until it moves one threshold
+        readDistance();
+      }
+      digitalWrite(LEFT_MOTOR_EN,LOW);
+      digitalWrite(RIGHT_MOTOR_EN,LOW);
+      break;
+    case GO_BACK:
+      //Same concept
+      //Move backward until the mouse knows it has travelled one cell threshold
+      while(front - mark_front <= CELL_THRESHOLD)
+      {
+        //Keep updating until it moves one threshold
+        readDistance();
+      }
+      digitalWrite(LEFT_MOTOR_EN,LOW);
+      digitalWrite(RIGHT_MOTOR_EN,LOW);
+      break;
+    case TURN_LEFT:
+    case TURN_RIGHT:
+      //We are allowed to do this because gyroZ will automatically be either positive or negative depending on turn direction
 
-//       //Mark down angle for comparison
-//       mark_angle = angle;
+      //Mark down angle for comparison
+      mark_angle = angle;
 
-//       while((fmod((angle - mark_angle),2*PI)) < PI/2)
-//       {
-//         //Read LSM to get rad/s values
-//         readLSM();
+      while((fmod((angle - mark_angle),2*PI)) < PI/2)
+      {
+        //Read LSM to get rad/s values
+        readLSM();
         
-//         //Delta angle/sec * delta t = total rads
-//         angle += gyroZ*(millis() - old_time);
-//       }
-//       break;
-//   }
-// }
-
-
-// /*
-//  * readEncoder1()- ISR for motor 1's encoder channel A's rising edge
-//  *
-//  * Parameters   : Nothing
-//  * Return Value : Nothing
-//  * Description  :
-//  * After getting an rising edge on ENCA it will check if ENCB is
-//  * 0 or 1, based of that it we can assume it went Clockwise if ENCB = 1
-//  * and Counter-Clockwise if ENCA = 1. The position value will change
-//  * depending on the direction
-//  */
-// void readEncoder1()
-// {
-//   // if (digitalRead(ENCB1) == HIGH)
-//   // {
-//   //   posM1--; /* Counter-Clockwise */
-//   // }
-//   // else
-//   // {
-//   //   posM1++; /* Clockwise */
-//   // }
-//   //Serial.println(posM1);
-// }
-
-
-// /*
-//  * readEncoder2()- ISR for motor 2's encoder channel A's rising edge
-//  *
-//  * Parameters   : Nothing
-//  * Return Value : Nothing
-//  * Description  :
-//  * Same function as readEncoder1(), but for motor 2
-//  */
-// void readEncoder2()
-// {
-//   // if (digitalRead(ENCB2) == HIGH)
-//   // {
-//   //   posM2++; /* Clockwise */
-//   // }
-//   // else
-//   // {
-//   //   posM2--; /* Counter-Clockwise */
-//   // }
-//   //Serial.println(posM2);
-// }
+        //Delta angle/sec * delta t = total rads
+        angle += gyroZ*(millis() - old_time);
+      }
+      break;
+  }
+}
