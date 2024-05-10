@@ -243,8 +243,11 @@ void loop() {
   delay(200);
   */
 
-  //Movement
-  cellMove(GO_FORWARD);
+  //ToF
+  readDistance();
+  Serial.println("left: " + left);
+  Serial.println("front: " + front);
+  Serial.println("right: " + right);
 
   //
 }
